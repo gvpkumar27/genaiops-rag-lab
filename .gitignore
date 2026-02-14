@@ -4,3 +4,8 @@ __pycache__/
 data/cache/
 data/runs/
 qdrant_storage/
+
+.env
+data/docs/
+
+.env
