@@ -19,42 +19,50 @@ def _tok(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]{3,}", text.lower()))
 
 
+def _clean_text(text: str) -> str:
+    text = re.sub(r"[\x00-\x1F\x7F]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
 def _extractive_fallback(question: str, hits: list[dict]) -> str | None:
     q = _tok(question)
     if not q:
         return None
 
-    ranked: list[tuple[int, str, str, int]] = []
+    ranked: list[tuple[int, int, str, str, int]] = []
     for h in hits:
-        text = h.get("text", "")
+        text = _clean_text(h.get("text", ""))
         source = h.get("source", "unknown")
         chunk_id = int(h.get("chunk_id", -1))
         parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text) if p.strip()]
         for p in parts:
             score = len(q & _tok(p))
-            if score > 0:
-                ranked.append((score, p, source, chunk_id))
+            words = len(p.split())
+            # Skip tiny or heading-like fragments.
+            if score > 0 and words >= 6:
+                ranked.append((score, words, p, source, chunk_id))
 
     if not ranked:
         return None
 
-    ranked.sort(key=lambda x: x[0], reverse=True)
+    ranked.sort(key=lambda x: (x[0], x[1]), reverse=True)
     picked = []
     seen = set()
-    for score, sent, source, chunk_id in ranked:
+    for score, words, sent, source, chunk_id in ranked:
         key = (source, chunk_id, sent[:80])
         if key in seen:
             continue
         seen.add(key)
         picked.append((sent, source, chunk_id))
-        if len(picked) == 2:
+        if len(picked) == 3:
             break
 
     if not picked:
         return None
 
-    lines = [f"{sent} [{source} | {chunk_id}]" for sent, source, chunk_id in picked]
-    return " ".join(lines)
+    lines = [f"- {sent} [{source} | {chunk_id}]" for sent, source, chunk_id in picked]
+    return "Based on the uploaded documents:\n" + "\n".join(lines)
 
 
 @app.get("/health")
@@ -107,7 +115,8 @@ def chat(req: ChatRequest):
         except requests.exceptions.RequestException as e:
             raise HTTPException(status_code=503, detail=f"Generation service unavailable: {e}") from e
 
-        if answer.strip().lower().startswith("i don't know based on the provided documents"):
+        ans_low = answer.strip().lower()
+        if ans_low.startswith("i don't know based on the provided documents") or len(answer.split()) < 12:
             fallback = _extractive_fallback(question, hits)
             if fallback:
                 answer = fallback

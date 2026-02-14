@@ -1,32 +1,20 @@
-import streamlit as st
 import requests
+import streamlit as st
 
 API_URL = "http://127.0.0.1:8000/chat"
 
-st.title("LocalDocChat (Open-source LLM + RAG)")
-q = st.text_input("Ask a question about your documents:")
+st.title("Local AI Knowledge Companion")
+q = st.text_input("Ask me anything about your documents:")
 
-if st.button("Ask") and q.strip():
+if st.button("Submit") and q.strip():
     try:
         r = requests.post(API_URL, json={"question": q}, timeout=600)
         if r.status_code >= 400:
-            detail = ""
-            try:
-                detail = r.json().get("detail", "")
-            except ValueError:
-                detail = r.text
-            st.error(f"Chat request failed ({r.status_code}): {detail or 'Unknown error'}")
+            # End-user UI: keep backend details out of the page.
+            st.error("Sorry, I couldn't generate an answer right now. Please try again.")
             st.stop()
 
         data = r.json()
-
-        st.subheader("Answer")
-        st.write(data["answer"])
-
-        st.subheader("Citations")
-        for c in data["citations"]:
-            st.write(f"- **{c['source']} | chunk {c['chunk_id']}** (score: {c['score']:.3f})")
-            st.caption(c["text_preview"])
-    except requests.RequestException as e:
-        st.error(f"Could not connect to API at {API_URL}: {e}")
-
+        st.write(data.get("answer", ""))
+    except requests.RequestException:
+        st.error("Service is temporarily unavailable. Please try again.")
