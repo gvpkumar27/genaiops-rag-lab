@@ -1,11 +1,15 @@
 .venv/
 __pycache__/
 *.pyc
+
+# runtime artifacts
 data/cache/
 data/runs/
 qdrant_storage/
 
+# local config and private docs
 .env
+.env.*
+!.env.example
+!.env.observability.example
 data/docs/
-
-.env

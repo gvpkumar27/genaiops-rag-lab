@@ -5,6 +5,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
 
 from app.config import settings
+from app.ops.metrics import set_docs_indexed_total, set_qdrant_collection_points
 from app.rag.chunking import chunk_text
 from app.rag.embeddings import embed_texts
 
@@ -99,6 +100,8 @@ def main():
     for i in tqdm(range(0, len(points), 64), desc="Upserting to Qdrant"):
         client.upsert(settings.QDRANT_COLLECTION, points[i : i + 64])
 
+    set_docs_indexed_total(len(files))
+    set_qdrant_collection_points(len(points))
     print(f"OK: Ingested {len(points)} chunks into '{settings.QDRANT_COLLECTION}'")
 
 

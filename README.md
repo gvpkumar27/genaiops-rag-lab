@@ -1,4 +1,4 @@
-﻿# GenAIOps RAG Lab
+# GenAIOps RAG Lab
 
 Local document Q&A app using FastAPI + Qdrant + Ollama + Streamlit.
 
@@ -40,6 +40,7 @@ Set environment variables if needed:
 - `CHAT_MODEL` (default: `mistral:7b-instruct`)
 - `EMBED_MODEL` (default: `nomic-embed-text`)
 - `TOP_K` (default: `5`)
+- `RETRIEVE_CANDIDATES` (default: `20`)
 - `CHUNK_SIZE` (default: `900`)
 - `CHUNK_OVERLAP` (default: `150`)
 - `ENABLE_RERANK` (default: `true`)
@@ -69,6 +70,46 @@ Health check:
 Invoke-RestMethod http://localhost:8000/health
 ```
 
+Metrics endpoint (Prometheus format):
+
+```powershell
+Invoke-WebRequest http://localhost:8000/metrics | Select-Object -ExpandProperty Content
+```
+
+Key metrics exposed:
+- `chat_requests_total`
+- `chat_errors_total{type=...}`
+- `chat_latency_seconds`
+- `retrieve_latency_seconds`
+- `rerank_latency_seconds`
+- `generate_latency_seconds`
+- `fallback_answers_total`
+- `cache_hits_total`
+- `docs_indexed_total`
+- `qdrant_collection_points`
+
+## Run Observability Stack (Prometheus + Grafana)
+
+From `genaiops-rag-lab` folder:
+
+```powershell
+Copy-Item .env.observability.example .env.observability
+# Edit .env.observability and set GRAFANA_ADMIN_PASSWORD
+docker compose --env-file .env.observability -f docker.compose.observability.yml up -d
+```
+
+Endpoints:
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000` (login from `.env.observability`)
+
+Grafana auto-loads:
+- data source: `Prometheus`
+- dashboard: `LocalDocChat Overview`
+
+Notes:
+- Keep FastAPI running on `http://localhost:8000` so Prometheus can scrape `/metrics`.
+- On Docker Desktop (Windows/Mac), Prometheus uses `host.docker.internal:8000`.
+
 ## Run UI
 
 From repo root:
@@ -92,3 +133,4 @@ From repo root:
 ```powershell
 .\.venv\Scripts\python -m pytest -q
 ```
+
