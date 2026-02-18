@@ -3,7 +3,7 @@ import time
 import uuid
 
 import requests
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from qdrant_client.http.exceptions import UnexpectedResponse
 
 from app.config import settings
@@ -30,15 +30,79 @@ from app.schemas import ChatRequest, ChatResponse, Citation
 
 app = FastAPI(title="LocalDocChat")
 
+def require_api_key(request: Request) -> None:
+    if not settings.API_KEY:
+        return
+    if request.headers.get("x-api-key", "") != settings.API_KEY:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+
+_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "into",
+    "your",
+    "you",
+    "are",
+    "was",
+    "were",
+    "have",
+    "has",
+    "had",
+    "what",
+    "when",
+    "where",
+    "why",
+    "how",
+    "can",
+    "does",
+    "did",
+    "will",
+    "would",
+    "should",
+    "about",
+    "based",
+    "provided",
+    "documents",
+}
+
 
 def _tok(text: str) -> set[str]:
-    return set(re.findall(r"[a-z0-9]{3,}", text.lower()))
+    toks = set(re.findall(r"[a-z0-9]{3,}", text.lower()))
+    return {t for t in toks if t not in _STOPWORDS}
 
 
 def _clean_text(text: str) -> str:
     text = re.sub(r"[\x00-\x1F\x7F]", " ", text)
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def _is_good_fallback_sentence(sent: str) -> bool:
+    words = sent.split()
+    if len(words) < 6 or len(words) > 36:
+        return False
+
+    low = sent.lower()
+    noise_markers = (
+        "article tags",
+        "last updated",
+        "sign in",
+        "output",
+        "driver code",
+        "formatted current date and time",
+    )
+    if any(m in low for m in noise_markers):
+        return False
+
+    alpha_count = sum(ch.isalpha() for ch in sent)
+    ratio = alpha_count / max(1, len(sent))
+    return ratio >= 0.65
 
 
 def _extractive_fallback(question: str, hits: list[dict]) -> str | None:
@@ -53,9 +117,11 @@ def _extractive_fallback(question: str, hits: list[dict]) -> str | None:
         chunk_id = int(h.get("chunk_id", -1))
         parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+|\n+", text) if p.strip()]
         for p in parts:
-            score = len(q & _tok(p))
+            p_toks = _tok(p)
+            score = len(q & p_toks)
             words = len(p.split())
-            if score > 0 and words >= 6:
+            keyword_score = score / max(1, len(q))
+            if score >= 2 and keyword_score >= 0.3 and words >= 6 and _is_good_fallback_sentence(p):
                 ranked.append((score, words, p, source, chunk_id))
 
     if not ranked:
@@ -86,12 +152,12 @@ def health():
 
 
 @app.get("/metrics")
-def metrics():
+def metrics(_: None = Depends(require_api_key)):
     return Response(content=render_metrics(), media_type=metrics_content_type())
 
 
 @app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest, request: Request):
+def chat(req: ChatRequest, request: Request, _: None = Depends(require_api_key)):
     request_id = request.headers.get("x-request-id") or uuid.uuid4().hex
     started = time.time()
     retrieve_sec = 0.0
@@ -171,7 +237,7 @@ def chat(req: ChatRequest, request: Request):
             raise HTTPException(status_code=503, detail=f"Generation service unavailable: {e}") from e
 
         ans_low = answer.strip().lower()
-        if ans_low.startswith("i don't know based on the provided documents") or len(answer.split()) < 12:
+        if ans_low.startswith("i don't know based on the provided documents"):
             fallback = _extractive_fallback(question, hits)
             if fallback:
                 fallback_used = True
@@ -265,7 +331,7 @@ def chat(req: ChatRequest, request: Request):
 def main() -> None:
     import uvicorn
 
-    uvicorn.run("app.__main__:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run("app.__main__:app", host=settings.API_HOST, port=settings.API_PORT, reload=False)
 
 
 if __name__ == "__main__":

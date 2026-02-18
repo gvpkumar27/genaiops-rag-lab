@@ -30,10 +30,19 @@ pip install -e .
 pip install -r dev-requirements.txt
 ```
 
+Alternative (single command for app + dev extras):
+
+```powershell
+pip install -e ".[dev]"
+```
+
 ## Configure (optional)
 
 Set environment variables if needed:
 
+- `API_HOST` (default: `127.0.0.1`)
+- `API_PORT` (default: `8000`)
+- `API_KEY` (default: empty; when set, `/chat` and `/metrics` require `x-api-key`)
 - `QDRANT_URL` (default: `http://localhost:6333`)
 - `QDRANT_COLLECTION` (default: `localdocchat`)
 - `OLLAMA_BASE_URL` (default: `http://localhost:11434`)
@@ -56,6 +65,8 @@ cd genaiops-rag-lab
 ..\.venv\Scripts\python -m app.rag.ingest
 ```
 
+Note: `data/docs/` is gitignored, so your local source files are not committed to the repo.
+
 ## Run API
 
 From `genaiops-rag-lab` folder:
@@ -75,6 +86,18 @@ Metrics endpoint (Prometheus format):
 ```powershell
 Invoke-WebRequest http://localhost:8000/metrics | Select-Object -ExpandProperty Content
 ```
+
+If `API_KEY` is set:
+
+```powershell
+Invoke-WebRequest http://localhost:8000/metrics -Headers @{"x-api-key"="<your-api-key>"} | Select-Object -ExpandProperty Content
+```
+
+## Security Notes (Local/Dev Defaults)
+
+- API defaults to `127.0.0.1:8000` (`API_HOST`/`API_PORT` are configurable).
+- When `API_KEY` is set, `/chat` and `/metrics` require header `x-api-key`.
+- If you expose this beyond localhost (`API_HOST=0.0.0.0`), set a strong `API_KEY` and use trusted network controls.
 
 Key metrics exposed:
 - `chat_requests_total`
@@ -97,6 +120,8 @@ Copy-Item .env.observability.example .env.observability
 # Edit .env.observability and set GRAFANA_ADMIN_PASSWORD
 docker compose --env-file .env.observability -f docker.compose.observability.yml up -d
 ```
+
+Note: Example values in `.env.observability.example` are placeholders; do not use them in production.
 
 Endpoints:
 - Prometheus: `http://localhost:9090`
@@ -125,6 +150,22 @@ From `genaiops-rag-lab` folder:
 ```powershell
 ..\.venv\Scripts\python .\eval\run_eval.py
 ```
+
+`eval/golden_qna.jsonl` format is JSON Lines (one JSON object per line):
+
+```jsonl
+{"question":"What is Retrieval Augmented Generation (RAG)?","expected_keywords":["retrieval","context","documents","generate"]}
+```
+
+Fields:
+- `question`: string
+- `expected_keywords`: list of strings used by simple keyword-match scoring in `eval/run_eval.py`
+
+Tip: use short, forgiving keywords (3-5 per question) because scoring is substring-based.
+
+## Docker Notes
+
+- `docker.compose.yml` maps Qdrant as `127.0.0.1:6333:6333` for local-only access by default.
 
 ## Run Tests
 
