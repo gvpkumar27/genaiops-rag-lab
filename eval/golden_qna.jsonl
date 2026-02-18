@@ -1,0 +1,16 @@
+{"question":"What is Retrieval Augmented Generation (RAG)?","expected_keywords":["retrieval","context","documents","generate"]}
+{"question":"Difference between generative AI and traditional AI?","expected_keywords":["generate","probability","discriminative","rules"]}
+{"question":"Why were default methods introduced in Java 8 interfaces?","expected_keywords":["default methods","backward compatibility","interfaces","implementation"]}
+{"question":"How do you resolve conflict when two interfaces define the same default method?","expected_keywords":["override","InterfaceName.super.method","multiple inheritance","default method"]}
+{"question":"What problem does Optional solve in Java 8?","expected_keywords":["nullpointerexception","optional","null","container"]}
+{"question":"What is the main purpose of the Java 8 Stream API?","expected_keywords":["stream api","functional","declarative","collections"]}
+{"question":"When should parallel streams be used in Java?","expected_keywords":["parallel stream","multiple threads","concurrently","performance"]}
+{"question":"What is a functional interface in Java 8?","expected_keywords":["one abstract method","functional interface","lambda","@FunctionalInterface"]}
+{"question":"Why do naive large file uploads fail?","expected_keywords":["timeout","high memory","no resume","fragile"]}
+{"question":"What chunk sizes are recommended for mobile vs desktop uploads?","expected_keywords":["4-8 mb","16-64 mb","chunk size","mobile","desktop"]}
+{"question":"How do resumable uploads work for large files?","expected_keywords":["tracks uploaded chunks","missing chunks","resume","checksum"]}
+{"question":"What are the benefits of pre-signed URLs for file uploads?","expected_keywords":["direct upload","s3","gcs","reduced server load","expires"]}
+{"question":"What are key multipart upload characteristics in cloud storage?","expected_keywords":["5mb-5gb","parallel","parts","complete upload","lifecycle rules"]}
+{"question":"How do HTTP range requests improve downloads?","expected_keywords":["206 partial content","resumable downloads","parallel downloads","video seeking"]}
+{"question":"What should be included in a production upload implementation checklist?","expected_keywords":["chunked uploads","resumable","checksum validation","retry with exponential backoff","integrity verification"]}
+{"question":"What core design principle is emphasized for handling large files?","expected_keywords":["break into smaller pieces","parallelism","design for failure","separate metadata"]}
