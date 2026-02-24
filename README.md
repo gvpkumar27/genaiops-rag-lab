@@ -43,17 +43,24 @@ Set environment variables if needed:
 - `API_HOST` (default: `127.0.0.1`)
 - `API_PORT` (default: `8000`)
 - `API_KEY` (default: empty; when set, `/chat` and `/metrics` require `x-api-key`)
+- `REQUIRE_API_KEY_ON_NON_LOCALHOST` (default: `true`; refuses non-localhost bind without API key)
 - `QDRANT_URL` (default: `http://localhost:6333`)
 - `QDRANT_COLLECTION` (default: `localdocchat`)
 - `OLLAMA_BASE_URL` (default: `http://localhost:11434`)
 - `CHAT_MODEL` (default: `mistral:7b-instruct`)
 - `EMBED_MODEL` (default: `nomic-embed-text`)
-- `TOP_K` (default: `5`)
-- `RETRIEVE_CANDIDATES` (default: `20`)
-- `CHUNK_SIZE` (default: `900`)
-- `CHUNK_OVERLAP` (default: `150`)
+- `TOP_K` (default: `6`)
+- `RETRIEVE_CANDIDATES` (default: `15`)
+- `CHUNK_SIZE` (default: `600`)
+- `CHUNK_OVERLAP` (default: `100`)
 - `ENABLE_RERANK` (default: `true`)
 - `ENABLE_CACHE` (default: `true`)
+- `OLLAMA_TEMPERATURE` (default: `0`)
+- `OLLAMA_TOP_P` (default: `1`)
+- `OLLAMA_SEED` (default: `7`)
+- `STABLE_QUERY_NORMALIZATION` (default: `true`)
+- `FAITHFULNESS_MIN_GROUNDED` (default: `0.30`)
+- `ENABLE_CONTAMINATION_FILTER` (default: `true`)
 
 ## Ingest Documents
 
@@ -97,6 +104,7 @@ Invoke-WebRequest http://localhost:8000/metrics -Headers @{"x-api-key"="<your-ap
 
 - API defaults to `127.0.0.1:8000` (`API_HOST`/`API_PORT` are configurable).
 - When `API_KEY` is set, `/chat` and `/metrics` require header `x-api-key`.
+- By default, app startup is blocked if `API_HOST` is non-localhost and `API_KEY` is empty.
 - If you expose this beyond localhost (`API_HOST=0.0.0.0`), set a strong `API_KEY` and use trusted network controls.
 
 Key metrics exposed:
@@ -143,6 +151,14 @@ From repo root:
 .\.venv\Scripts\streamlit run .\genaiops-rag-lab\ui\streamlit_app.py
 ```
 
+UI security options:
+- `PUBLIC_UI_MODE` (default: `true`) hides raw source path/chunk/score details in citations.
+- `SHOW_CITATION_DEBUG` (default: `false`) re-enables raw citation debug details for internal use.
+
+Note:
+- `PUBLIC_UI_MODE` only affects Streamlit rendering. The `/chat` API response still includes raw citation metadata (`source`, `chunk_id`, `score`, `text_preview`).
+- For public exposure, keep API access authenticated and route users through UI or a sanitizing backend proxy.
+
 ## Run Eval
 
 From `genaiops-rag-lab` folder:
@@ -162,6 +178,10 @@ Fields:
 - `expected_keywords`: list of strings used by simple keyword-match scoring in `eval/run_eval.py`
 
 Tip: use short, forgiving keywords (3-5 per question) because scoring is substring-based.
+
+Public repo best practice:
+- Keep `eval/*` public files sanitized/synthetic.
+- Put internal golden references (full answer keys/citation targets) under `eval/private/` (gitignored).
 
 ## Docker Notes
 

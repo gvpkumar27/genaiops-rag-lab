@@ -1,12 +1,22 @@
 import hashlib, json
 from pathlib import Path
 from app.config import settings
+from app.rag.query import normalized_question
 
 CACHE_DIR = Path("data/cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 def _key(question: str) -> str:
-    raw = json.dumps({"q": question, "m": settings.CHAT_MODEL, "p": settings.PROMPT_VERSION}, sort_keys=True)
+    raw = json.dumps(
+        {
+            "q": normalized_question(question),
+            "m": settings.CHAT_MODEL,
+            "p": settings.PROMPT_VERSION,
+            "t": settings.OLLAMA_TEMPERATURE,
+            "seed": settings.OLLAMA_SEED,
+        },
+        sort_keys=True,
+    )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 def get_cached(question: str):

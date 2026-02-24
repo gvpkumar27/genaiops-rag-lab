@@ -19,13 +19,27 @@ Return ONLY JSON array of indices best-first. Example: [2,0,1]
     r = requests.post(chat_url, json={
         "model": settings.CHAT_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "stream": False
+        "stream": False,
+        "options": {
+            "temperature": settings.OLLAMA_TEMPERATURE,
+            "top_p": settings.OLLAMA_TOP_P,
+            "seed": settings.OLLAMA_SEED,
+        },
     }, timeout=180)
     if r.status_code == 404:
         gen_url = f"{settings.OLLAMA_BASE_URL}/api/generate"
         fallback = requests.post(
             gen_url,
-            json={"model": settings.CHAT_MODEL, "prompt": prompt, "stream": False},
+            json={
+                "model": settings.CHAT_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": settings.OLLAMA_TEMPERATURE,
+                    "top_p": settings.OLLAMA_TOP_P,
+                    "seed": settings.OLLAMA_SEED,
+                },
+            },
             timeout=180,
         )
         fallback.raise_for_status()

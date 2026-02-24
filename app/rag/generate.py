@@ -12,7 +12,12 @@ def generate_answer(question: str, contexts: list[dict]) -> str:
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ],
-        "stream": False
+        "stream": False,
+        "options": {
+            "temperature": settings.OLLAMA_TEMPERATURE,
+            "top_p": settings.OLLAMA_TOP_P,
+            "seed": settings.OLLAMA_SEED,
+        },
     }, timeout=240)
     if r.status_code == 404:
         # Backward compatibility for older Ollama servers.
@@ -23,6 +28,11 @@ def generate_answer(question: str, contexts: list[dict]) -> str:
                 "model": settings.CHAT_MODEL,
                 "prompt": f"{SYSTEM_PROMPT}\n\n{user_prompt}",
                 "stream": False,
+                "options": {
+                    "temperature": settings.OLLAMA_TEMPERATURE,
+                    "top_p": settings.OLLAMA_TOP_P,
+                    "seed": settings.OLLAMA_SEED,
+                },
             },
             timeout=240,
         )

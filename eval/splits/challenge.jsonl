@@ -1,0 +1,4 @@
+{"question":"What is Retrieval Augmented Generation (RAG)?","expected_keywords":["retrieval","context","documents","generate"],"expect_unknown":true}
+{"question":"Difference between generative AI and traditional AI?","expected_keywords":["generate","probability","discriminative","rules"],"expect_unknown":true}
+{"question":"What should be included in a production upload implementation checklist?","expected_keywords":["chunked uploads","resumable","checksum validation","integrity verification"],"expect_unknown":false}
+{"question":"What core design principle is emphasized for handling large files?","expected_keywords":["smaller pieces","parallelism","design for failure"],"expect_unknown":false}

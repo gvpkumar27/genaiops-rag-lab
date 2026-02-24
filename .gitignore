@@ -13,3 +13,4 @@ qdrant_storage/
 !.env.example
 !.env.observability.example
 data/docs/
+eval/private/

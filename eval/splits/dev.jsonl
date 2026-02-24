@@ -1,0 +1,6 @@
+{"question":"Why were default methods introduced in Java 8 interfaces?","expected_keywords":["default methods","backward compatibility","interfaces"],"expect_unknown":false}
+{"question":"How do you resolve conflict when two interfaces define the same default method?","expected_keywords":["override","InterfaceName.super.method","default method"],"expect_unknown":false}
+{"question":"What problem does Optional solve in Java 8?","expected_keywords":["null","optional","nullpointerexception"],"expect_unknown":false}
+{"question":"What is the main purpose of the Java 8 Stream API?","expected_keywords":["stream api","functional","collections"],"expect_unknown":false}
+{"question":"When should parallel streams be used in Java?","expected_keywords":["parallel stream","multiple threads","performance"],"expect_unknown":false}
+{"question":"What is a functional interface in Java 8?","expected_keywords":["one abstract method","functional interface","lambda"],"expect_unknown":false}

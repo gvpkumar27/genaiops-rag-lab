@@ -1,0 +1,6 @@
+{"question":"Why do naive large file uploads fail?","expected_keywords":["timeout","memory","resume"],"expect_unknown":false}
+{"question":"What chunk sizes are recommended for mobile vs desktop uploads?","expected_keywords":["chunk size","mobile","desktop"],"expect_unknown":false}
+{"question":"How do resumable uploads work for large files?","expected_keywords":["tracks uploaded chunks","resume","missing chunks"],"expect_unknown":false}
+{"question":"What are the benefits of pre-signed URLs for file uploads?","expected_keywords":["direct upload","reduced server load","expires"],"expect_unknown":false}
+{"question":"What are key multipart upload characteristics in cloud storage?","expected_keywords":["parts","parallel","complete upload"],"expect_unknown":false}
+{"question":"How do HTTP range requests improve downloads?","expected_keywords":["206 partial content","resumable downloads","parallel downloads"],"expect_unknown":false}
