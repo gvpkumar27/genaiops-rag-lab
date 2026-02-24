@@ -44,6 +44,7 @@ Set environment variables if needed:
 - `API_PORT` (default: `8000`)
 - `API_KEY` (default: empty; when set, `/chat` and `/metrics` require `x-api-key`)
 - `REQUIRE_API_KEY_ON_NON_LOCALHOST` (default: `true`; refuses non-localhost bind without API key)
+- `PUBLIC_RESPONSE_SANITIZE` (default: `true`; sanitizes citation metadata in API responses for public safety)
 - `QDRANT_URL` (default: `http://localhost:6333`)
 - `QDRANT_COLLECTION` (default: `localdocchat`)
 - `OLLAMA_BASE_URL` (default: `http://localhost:11434`)
@@ -156,8 +157,9 @@ UI security options:
 - `SHOW_CITATION_DEBUG` (default: `false`) re-enables raw citation debug details for internal use.
 
 Note:
-- `PUBLIC_UI_MODE` only affects Streamlit rendering. The `/chat` API response still includes raw citation metadata (`source`, `chunk_id`, `score`, `text_preview`).
-- For public exposure, keep API access authenticated and route users through UI or a sanitizing backend proxy.
+- With `PUBLIC_RESPONSE_SANITIZE=true`, `/chat` returns sanitized citations (`Document N`) and removes raw chunk/score/preview details.
+- Set `PUBLIC_RESPONSE_SANITIZE=false` only for trusted internal debugging.
+- Keep API access authenticated for any public exposure.
 
 ## Run Eval
 

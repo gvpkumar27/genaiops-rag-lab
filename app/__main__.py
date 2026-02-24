@@ -252,6 +252,42 @@ def _strip_unknown_marker(answer: str) -> str:
     return out.strip(" \n\r\t-")
 
 
+def _public_source_labels(citations: list[Citation]) -> dict[str, str]:
+    labels: dict[str, str] = {}
+    n = 1
+    for c in citations:
+        src = c.source
+        if src not in labels:
+            labels[src] = f"Document {n}"
+            n += 1
+    return labels
+
+
+def _sanitize_answer_citation_tags(answer: str, labels: dict[str, str]) -> str:
+    if not answer:
+        return answer
+    out = answer
+    for src, label in sorted(labels.items(), key=lambda kv: len(kv[0]), reverse=True):
+        pattern = re.compile(rf"\[\s*{re.escape(src)}\s*\|\s*-?\d+\s*\]")
+        out = pattern.sub(f"[{label}]", out)
+    # If model emitted unknown source tags, reduce to generic label.
+    out = re.sub(r"\[[^\[\]\n]+\|\s*-?\d+\]", "[Document]", out)
+    return out
+
+
+def _sanitize_citations_for_public(citations: list[Citation]) -> list[Citation]:
+    labels = _public_source_labels(citations)
+    deduped: list[Citation] = []
+    seen = set()
+    for c in citations:
+        label = labels.get(c.source, "Document")
+        if label in seen:
+            continue
+        seen.add(label)
+        deduped.append(Citation(source=label, chunk_id=-1, score=0.0, text_preview=""))
+    return deduped
+
+
 def _select_contexts(question: str, hits: list[dict]) -> list[dict]:
     if not hits:
         return []
@@ -430,6 +466,15 @@ def chat(req: ChatRequest, request: Request, _: None = Depends(require_api_key))
                 "groundedness": _answer_groundedness(answer, contexts),
             },
         )
+
+        if settings.PUBLIC_RESPONSE_SANITIZE:
+            labels = _public_source_labels(result.citations)
+            result.answer = _sanitize_answer_citation_tags(result.answer, labels)
+            result.citations = _sanitize_citations_for_public(result.citations)
+            result.meta = {
+                **result.meta,
+                "public_response_sanitized": True,
+            }
 
         log_event(
             {

@@ -8,6 +8,7 @@ class Settings:
     API_PORT = int(os.getenv("API_PORT", "8000"))
     API_KEY = os.getenv("API_KEY", "").strip()
     REQUIRE_API_KEY_ON_NON_LOCALHOST = os.getenv("REQUIRE_API_KEY_ON_NON_LOCALHOST", "true").lower() == "true"
+    PUBLIC_RESPONSE_SANITIZE = os.getenv("PUBLIC_RESPONSE_SANITIZE", "true").lower() == "true"
 
     QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
     QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "localdocchat")
