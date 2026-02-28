@@ -1,5 +1,8 @@
-import json, requests
+import json
+
 from app.config import settings
+from app.ops.http import post_json
+
 
 def llm_rerank(question: str, hits: list[dict], keep: int = 5) -> list[dict]:
     chat_url = f"{settings.OLLAMA_BASE_URL}/api/chat"
@@ -16,21 +19,25 @@ Passages:
 Return ONLY JSON array of indices best-first. Example: [2,0,1]
 """.strip()
 
-    r = requests.post(chat_url, json={
-        "model": settings.CHAT_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": False,
-        "options": {
-            "temperature": settings.OLLAMA_TEMPERATURE,
-            "top_p": settings.OLLAMA_TOP_P,
-            "seed": settings.OLLAMA_SEED,
+    r = post_json(
+        chat_url,
+        payload={
+            "model": settings.CHAT_MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "options": {
+                "temperature": settings.OLLAMA_TEMPERATURE,
+                "top_p": settings.OLLAMA_TOP_P,
+                "seed": settings.OLLAMA_SEED,
+            },
         },
-    }, timeout=180)
+        timeout=180,
+    )
     if r.status_code == 404:
         gen_url = f"{settings.OLLAMA_BASE_URL}/api/generate"
-        fallback = requests.post(
+        fallback = post_json(
             gen_url,
-            json={
+            payload={
                 "model": settings.CHAT_MODEL,
                 "prompt": prompt,
                 "stream": False,

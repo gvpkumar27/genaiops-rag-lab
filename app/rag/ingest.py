@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import re
 from tqdm import tqdm
 from qdrant_client import QdrantClient
@@ -8,6 +9,56 @@ from app.config import settings
 from app.ops.metrics import set_docs_indexed_total, set_qdrant_collection_points
 from app.rag.chunking import chunk_text
 from app.rag.embeddings import embed_texts
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _qa_name_hints() -> list[str]:
+    raw = os.getenv(
+        "QA_DOC_NAME_HINTS",
+        "q_a,qa,q&a,question,answer,interview,faq",
+    ).strip()
+    return [part.strip().lower() for part in raw.split(",") if part.strip()]
+
+
+def _chunk_policy_for_file(path: Path) -> tuple[int, int]:
+    default_size = settings.CHUNK_SIZE
+    default_overlap = settings.CHUNK_OVERLAP
+
+    large_doc_mb = _env_float("LARGE_DOC_MB_THRESHOLD", 8.0)
+    large_chunk_size = _env_int("CHUNK_SIZE_LARGE_DOC", 420)
+    large_overlap = _env_int("CHUNK_OVERLAP_LARGE_DOC", 70)
+
+    qa_chunk_size = _env_int("CHUNK_SIZE_QA_DOC", 360)
+    qa_overlap = _env_int("CHUNK_OVERLAP_QA_DOC", 60)
+
+    stem = path.stem.lower()
+    if any(hint in stem for hint in _qa_name_hints()):
+        return qa_chunk_size, qa_overlap
+
+    size_mb = path.stat().st_size / (1024 * 1024)
+    if path.suffix.lower() == ".pdf" and size_mb >= large_doc_mb:
+        return large_chunk_size, large_overlap
+
+    return default_size, default_overlap
 
 
 def _merge_fragmented_letters(text: str) -> str:
@@ -82,7 +133,8 @@ def main():
 
     for fp in files:
         text = read_file(fp)
-        chunks = chunk_text(text, settings.CHUNK_SIZE, settings.CHUNK_OVERLAP)
+        chunk_size, overlap = _chunk_policy_for_file(fp)
+        chunks = chunk_text(text, chunk_size, overlap)
         if not chunks:
             continue
 

@@ -1,10 +1,13 @@
-import hashlib, json
+import hashlib
+import json
 from pathlib import Path
+
 from app.config import settings
 from app.rag.query import normalized_question
 
 CACHE_DIR = Path("data/cache")
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def _key(question: str) -> str:
     raw = json.dumps(
@@ -19,11 +22,13 @@ def _key(question: str) -> str:
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
+
 def get_cached(question: str):
     fp = CACHE_DIR / f"{_key(question)}.json"
     if fp.exists():
         return json.loads(fp.read_text(encoding="utf-8"))
     return None
+
 
 def set_cached(question: str, value: dict):
     fp = CACHE_DIR / f"{_key(question)}.json"

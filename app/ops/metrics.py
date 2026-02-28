@@ -1,30 +1,59 @@
 import time
 from contextlib import contextmanager
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
+from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 
-CHAT_REQUESTS_TOTAL = Counter("chat_requests_total", "Total number of /chat requests")
-CHAT_ERRORS_TOTAL = Counter("chat_errors_total", "Total number of failed /chat requests", ["type"])
+CHAT_REQUESTS_TOTAL = Counter("queries_total", "Total number of query requests")
+CHAT_ERRORS_TOTAL = Counter(
+    "query_errors_total",
+    "Total number of failed query requests",
+    ["reason"],
+)
 FALLBACK_ANSWERS_TOTAL = Counter(
-    "fallback_answers_total", "Total number of extractive fallback answers"
+    "fallback_total",
+    "Total number of fallback answers",
 )
 CACHE_HITS_TOTAL = Counter("cache_hits_total", "Total number of cache hits")
-RERANK_FAILURES_TOTAL = Counter("rerank_failures_total", "Total number of rerank failures")
-
-CHAT_LATENCY_SECONDS = Histogram("chat_latency_seconds", "End-to-end /chat latency in seconds")
-RETRIEVE_LATENCY_SECONDS = Histogram(
-    "retrieve_latency_seconds", "Retrieval stage latency in seconds"
+RERANK_FAILURES_TOTAL = Counter(
+    "rank_failures_total",
+    "Total number of ranking failures",
 )
-RERANK_LATENCY_SECONDS = Histogram("rerank_latency_seconds", "Rerank stage latency in seconds")
+PROMPT_ATTACKS_BLOCKED_TOTAL = Counter(
+    "policy_blocks_total",
+    "Total number of policy-blocked requests",
+    ["policy"],
+)
+OUT_OF_SCOPE_BLOCKS_TOTAL = Counter(
+    "scope_blocks_total",
+    "Total number of scope-blocked requests",
+)
+
+CHAT_LATENCY_SECONDS = Histogram("query_seconds", "End-to-end query latency in seconds")
+RETRIEVE_LATENCY_SECONDS = Histogram(
+    "search_seconds",
+    "Search stage latency in seconds",
+)
+RERANK_LATENCY_SECONDS = Histogram("rank_seconds", "Ranking stage latency in seconds")
 GENERATE_LATENCY_SECONDS = Histogram(
-    "generate_latency_seconds", "Generation stage latency in seconds"
+    "answer_seconds",
+    "Answer stage latency in seconds",
 )
 
 QDRANT_COLLECTION_POINTS = Gauge(
-    "qdrant_collection_points", "Estimated number of points in current Qdrant collection"
+    "index_points_total",
+    "Estimated number of points in current index",
 )
-DOCS_INDEXED_TOTAL = Gauge("docs_indexed_total", "Number of docs indexed in last ingest run")
+DOCS_INDEXED_TOTAL = Gauge(
+    "docs_indexed_total",
+    "Number of documents indexed in last ingest run",
+)
 
 
 @contextmanager
@@ -54,7 +83,7 @@ def inc_chat_requests() -> None:
 
 
 def inc_chat_error(error_type: str) -> None:
-    CHAT_ERRORS_TOTAL.labels(type=error_type).inc()
+    CHAT_ERRORS_TOTAL.labels(reason=error_type).inc()
 
 
 def inc_fallback_answers() -> None:
@@ -67,6 +96,14 @@ def inc_cache_hits() -> None:
 
 def inc_rerank_failures() -> None:
     RERANK_FAILURES_TOTAL.inc()
+
+
+def inc_prompt_attack_blocked(category: str) -> None:
+    PROMPT_ATTACKS_BLOCKED_TOTAL.labels(policy=category).inc()
+
+
+def inc_out_of_scope_block() -> None:
+    OUT_OF_SCOPE_BLOCKS_TOTAL.inc()
 
 
 def set_qdrant_collection_points(count: int) -> None:

@@ -31,12 +31,12 @@
       "id": 1,
       "targets": [
         {
-          "expr": "rate(chat_requests_total[5m])",
+          "expr": "rate(queries_total[5m])",
           "legendFormat": "requests/sec",
           "refId": "A"
         }
       ],
-      "title": "Chat Request Rate",
+      "title": "Query Request Rate",
       "type": "timeseries"
     },
     {
@@ -62,12 +62,12 @@
       "id": 2,
       "targets": [
         {
-          "expr": "sum by (type) (increase(chat_errors_total[15m]))",
-          "legendFormat": "{{type}}",
+          "expr": "sum by (reason) (increase(query_errors_total[15m]))",
+          "legendFormat": "{{reason}}",
           "refId": "A"
         }
       ],
-      "title": "Errors by Type (15m)",
+      "title": "Errors by Reason (15m)",
       "type": "timeseries"
     },
     {
@@ -93,17 +93,17 @@
       "id": 3,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(chat_latency_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(query_seconds_bucket[5m])) by (le))",
           "legendFormat": "p95",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.50, sum(rate(chat_latency_seconds_bucket[5m])) by (le))",
+          "expr": "histogram_quantile(0.50, sum(rate(query_seconds_bucket[5m])) by (le))",
           "legendFormat": "p50",
           "refId": "B"
         }
       ],
-      "title": "Chat Latency (p50/p95)",
+      "title": "Query Latency (p50/p95)",
       "type": "timeseries"
     },
     {
@@ -129,13 +129,13 @@
       "id": 4,
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum(rate(retrieve_latency_seconds_bucket[5m])) by (le))",
-          "legendFormat": "retrieve p95",
+          "expr": "histogram_quantile(0.95, sum(rate(search_seconds_bucket[5m])) by (le))",
+          "legendFormat": "search p95",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(generate_latency_seconds_bucket[5m])) by (le))",
-          "legendFormat": "generate p95",
+          "expr": "histogram_quantile(0.95, sum(rate(answer_seconds_bucket[5m])) by (le))",
+          "legendFormat": "answer p95",
           "refId": "B"
         }
       ],
@@ -174,11 +174,11 @@
       "id": 5,
       "targets": [
         {
-          "expr": "chat_requests_total",
+          "expr": "queries_total",
           "refId": "A"
         }
       ],
-      "title": "Total Chat Requests",
+      "title": "Total Query Requests",
       "type": "stat"
     },
     {
@@ -213,11 +213,11 @@
       "id": 6,
       "targets": [
         {
-          "expr": "fallback_answers_total",
+          "expr": "fallback_total",
           "refId": "A"
         }
       ],
-      "title": "Fallback Answers",
+      "title": "Fallback Responses",
       "type": "stat"
     },
     {
@@ -291,11 +291,11 @@
       "id": 8,
       "targets": [
         {
-          "expr": "qdrant_collection_points",
+          "expr": "index_points_total",
           "refId": "A"
         }
       ],
-      "title": "Indexed Chunks",
+      "title": "Index Points",
       "type": "stat"
     }
   ],

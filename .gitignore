@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 *.pyc
+*.egg-info/
 
 # runtime artifacts
 data/cache/
@@ -14,3 +15,5 @@ qdrant_storage/
 !.env.observability.example
 data/docs/
 eval/private/
+internal/*
+!internal/guardrails_rules.example.json

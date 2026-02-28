@@ -1,0 +1,24 @@
+{
+  "_note": "Template only. Use placeholders here; keep real production signatures in local-only internal/guardrails_rules.json.",
+  "disable_baseline_categories": [
+    "<optional_category_name>"
+  ],
+  "educational_intent": [
+    "<regex_for_safe_educational_intent>"
+  ],
+  "harmful_intent": [
+    "<regex_for_actionable_harmful_intent>"
+  ],
+  "sensitive_terms": [
+    "<normalized_sensitive_term>"
+  ],
+  "blocked_terms": [
+    "<normalized_blocked_term>"
+  ],
+  "patterns": {
+    "<category_name>": [
+      "<regex_pattern_1>",
+      "<regex_pattern_2>"
+    ]
+  }
+}
