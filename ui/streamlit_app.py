@@ -113,7 +113,7 @@ def _render_sidebar() -> None:
     with st.sidebar:
         st.header("Welcome")
         st.write(
-            "Ask questions on your uploaded documents with grounded citations."
+            "Ask questions and get clear, reliable answers."
         )
 
         if st.button("New Chat", use_container_width=True):

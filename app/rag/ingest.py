@@ -1,6 +1,8 @@
 from pathlib import Path
 import os
 import re
+import hashlib
+import time
 from tqdm import tqdm
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qm
@@ -9,6 +11,7 @@ from app.config import settings
 from app.ops.metrics import set_docs_indexed_total, set_qdrant_collection_points
 from app.rag.chunking import chunk_text
 from app.rag.embeddings import embed_texts
+from app.rag.intent import infer_chunk_section_type
 
 
 def _env_int(name: str, default: int) -> int:
@@ -93,6 +96,22 @@ def _normalize_text(text: str) -> str:
     return text.strip()
 
 
+def _source_trust_score(path: Path) -> float:
+    low = str(path).replace("\\", "/").lower()
+    trust_markers = ("official", "policy", "handbook", "runbook", "design", "spec")
+    if any(marker in low for marker in trust_markers):
+        return 1.0
+    return 0.0
+
+
+def _stale_threshold_days() -> int:
+    return _env_int("DOC_STALE_DAYS", 3650)
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def read_file(path: Path) -> str:
     if path.suffix.lower() == ".pdf":
         from pypdf import PdfReader
@@ -130,6 +149,8 @@ def main():
 
     points = []
     pid = 1
+    seen_hashes: set[str] = set()
+    now = time.time()
 
     for fp in files:
         text = read_file(fp)
@@ -138,13 +159,28 @@ def main():
         if not chunks:
             continue
 
+        modified_ts = fp.stat().st_mtime
+        age_days = int(max(0, (now - modified_ts) / 86400))
+        is_stale = age_days > _stale_threshold_days()
+        source_trust = _source_trust_score(fp)
+
         vecs = embed_texts(chunks)
         for i, (chunk, vec) in enumerate(zip(chunks, vecs)):
+            content_hash = _content_hash(chunk)
+            if content_hash in seen_hashes:
+                continue
+            seen_hashes.add(content_hash)
             payload = {
                 "source": str(fp).replace("\\", "/"),
                 "chunk_id": i,
                 "text": chunk,
                 "type": fp.suffix.lower().lstrip(".") or "txt",
+                "section_type": infer_chunk_section_type(chunk),
+                "content_hash": content_hash,
+                "source_updated_at": int(modified_ts),
+                "source_age_days": age_days,
+                "is_stale": is_stale,
+                "source_trust": source_trust,
             }
             points.append(qm.PointStruct(id=pid, vector=vec, payload=payload))
             pid += 1

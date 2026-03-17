@@ -1,5 +1,8 @@
 {"question":"What is Retrieval Augmented Generation (RAG)?","expected_keywords":["retrieval","context","documents","generate"]}
+{"question":"Summarize Retrieval Augmented Generation (RAG) in simple terms.","expected_keywords":["retrieval","context","documents","generate"]}
 {"question":"Difference between generative AI and traditional AI?","expected_keywords":["generate","probability","discriminative","rules"]}
+{"question":"What do you mean by machine learning? explain in simple terms with examples?","expected_keywords":["machine learning","learn","data","examples"]}
+{"question":"Give examples of machine learning from the document.","expected_keywords":["machine learning","example","classification","regression"]}
 {"question":"Why were default methods introduced in Java 8 interfaces?","expected_keywords":["default methods","backward compatibility","interfaces","implementation"]}
 {"question":"How do you resolve conflict when two interfaces define the same default method?","expected_keywords":["override","InterfaceName.super.method","multiple inheritance","default method"]}
 {"question":"What problem does Optional solve in Java 8?","expected_keywords":["nullpointerexception","optional","null","container"]}

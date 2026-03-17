@@ -5,7 +5,7 @@ GenAIOps RAG Lab is a local-first Retrieval-Augmented Generation platform for se
 ## System Overview
 
 - API service: FastAPI application for `/health`, `/chat`, and `/metrics`
-- Retrieval stack: Qdrant vector search with lexical fallback and optional reranking
+- Retrieval stack: Qdrant vector search with lexical fallback, intent-aware ranking, and optional reranking
 - Inference stack: Ollama for embedding and response generation
 - User interface: Streamlit chat client
 - Observability: Prometheus metrics with Grafana dashboards
@@ -80,6 +80,9 @@ cd genaiops-rag-lab
 ..\.venv\Scripts\python -m app.rag.ingest
 ```
 
+Note:
+- Re-run ingestion after changing chunking or ingest-time payload metadata so Qdrant reflects the latest retrieval signals.
+
 ### Run API
 
 ```powershell
@@ -115,7 +118,13 @@ Endpoints:
 - Local-safe defaults (`127.0.0.1` bindings where applicable)
 - API key enforcement for non-localhost deployment
 - Public response sanitization for citation metadata
-- No private documents or secrets committed to repository (`data/docs/`, `.env*` protected by gitignore)
+- Repository is intended to exclude private documents, local env files, and internal guardrail assets via gitignore (`data/docs/`, `.env*`, and `internal/`)
+
+## Retrieval Behavior
+
+- Query normalization reduces sensitivity to small wording variants.
+- Intent-aware retrieval helps prioritize chunks that read like definitions, examples, summaries, comparisons, or usage guidance.
+- Ingest stores lightweight chunk metadata used only to improve retrieval quality; grounded generation and unknown-answer behavior remain unchanged.
 
 ## Evaluation
 

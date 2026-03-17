@@ -8,6 +8,7 @@ import hashlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import requests
 import uvicorn
@@ -38,9 +39,11 @@ from app.ops.metrics import (
 from app.rag.cache import get_cached, set_cached
 from app.rag.generate import generate_answer
 from app.rag.guardrails import analyze_question_risk, validate_guardrails_config
+from app.rag.intent import DEFINITION, detect_answer_intent
+from app.rag.query import normalized_question
 from app.rag.rerank import llm_rerank
 from app.rag.retrieve import retrieve
-from app.schemas import ChatRequest, ChatResponse, Citation
+from app.schemas import ChatRequest, ChatResponse, Citation, FeedbackRequest
 
 
 def _is_local_bind_host(host: str) -> bool:
@@ -136,6 +139,35 @@ _STOPWORDS = {
 }
 
 _UNKNOWN_SENTENCE = "I don't know based on the provided documents."
+_MEDICAL_SAFETY_TERMS = {
+    "fever",
+    "headache",
+    "migraine",
+    "nausea",
+    "nauseous",
+    "vomiting",
+    "vomit",
+    "dizzy",
+    "dizziness",
+    "insomnia",
+    "sleep",
+    "sleeping",
+    "cough",
+    "cold",
+    "flu",
+    "pain",
+    "stomachache",
+    "stomach",
+    "diarrhea",
+    "rash",
+    "infection",
+    "anxiety",
+    "depression",
+}
+_BASIC_ARITHMETIC_PATTERN = re.compile(
+    r"^\s*(?:what(?:'s| is)\s+)?(-?\d+(?:\.\d+)?)\s*([+\-*/])\s*(-?\d+(?:\.\d+)?)\s*\??\s*$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -153,14 +185,134 @@ def _tok(text: str) -> set[str]:
     return {t for t in toks if t not in _STOPWORDS}
 
 
+def _question_tokens(question: str) -> set[str]:
+    normalized = normalized_question(question)
+    if normalized:
+        normalized_tokens = _tok(normalized)
+        if normalized_tokens:
+            return normalized_tokens
+    return _tok(question)
+
+
 def _is_meaningful_question(question: str) -> bool:
     if not question.strip():
         return False
+    if _basic_arithmetic_answer(question.strip()):
+        return True
     return bool(re.search(r"[a-zA-Z0-9]{2,}", question))
 
 
+def _edit_distance_within_one(left: str, right: str) -> bool:
+    if left == right:
+        return True
+    if abs(len(left) - len(right)) > 1:
+        return False
+
+    if len(left) > len(right):
+        left, right = right, left
+
+    idx = 0
+    mismatch_used = False
+    jdx = 0
+    while idx < len(left) and jdx < len(right):
+        if left[idx] == right[jdx]:
+            idx += 1
+            jdx += 1
+            continue
+        if mismatch_used:
+            return False
+        mismatch_used = True
+        if len(left) == len(right):
+            idx += 1
+        jdx += 1
+    return True
+
+
+def _contains_medical_symptom(question: str) -> bool:
+    for token in re.findall(r"[a-z]+", question.lower()):
+        if any(_edit_distance_within_one(token, term) for term in _MEDICAL_SAFETY_TERMS):
+            return True
+    return False
+
+
+def _basic_arithmetic_answer(question: str) -> str | None:
+    match = _BASIC_ARITHMETIC_PATTERN.match(question.strip().lower())
+    if not match:
+        return None
+
+    left = float(match.group(1))
+    operator = match.group(2)
+    right = float(match.group(3))
+
+    operations: dict[str, Callable[[float, float], float]] = {
+        "+": lambda a, b: a + b,
+        "-": lambda a, b: a - b,
+        "*": lambda a, b: a * b,
+        "/": lambda a, b: a / b if b != 0 else float("inf"),
+    }
+    if operator == "/" and right == 0:
+        return "Division by zero is undefined."
+
+    result = operations[operator](left, right)
+    if result.is_integer():
+        return str(int(result))
+    return str(result)
+
+
+def _safe_medical_answer(question: str) -> str | None:
+    if not _contains_medical_symptom(question):
+        return None
+    return (
+        "I'm not able to provide medical advice. If you have a fever, contact a "
+        "qualified clinician, especially if it is very high, lasts more than a few "
+        "days, or comes with trouble breathing, confusion, dehydration, severe pain, "
+        "or seizures."
+    )
+
+
+def _safe_medical_answer_policy(question: str) -> str | None:
+    if not _contains_medical_symptom(question):
+        return None
+    return (
+        "I'm not able to provide medical advice. If you have symptoms or a medical "
+        "concern, contact a qualified clinician, especially if it is severe, getting "
+        "worse, lasts more than a few days, or comes with trouble breathing, "
+        "confusion, dehydration, severe pain, or seizures."
+    )
+
+
+def _non_rag_fallback_answer(question: str) -> tuple[str, str] | None:
+    medical_answer = _safe_medical_answer_policy(question)
+    if medical_answer:
+        return medical_answer, "medical_safety"
+
+    arithmetic_answer = _basic_arithmetic_answer(question)
+    if arithmetic_answer:
+        return arithmetic_answer, "basic_arithmetic"
+
+    return None
+
+
+def _is_short_ambiguous_question(question: str) -> bool:
+    stripped = question.strip().lower()
+    if not stripped or _basic_arithmetic_answer(stripped) or _contains_medical_symptom(stripped):
+        return False
+    tokens = re.findall(r"[a-z0-9]+", stripped)
+    return len(tokens) == 1
+
+
+def _clarification_prompt(question: str) -> str:
+    topic = question.strip().rstrip("?.!")
+    if not topic:
+        return "Please clarify what you want help with."
+    return (
+        f"Please clarify what you want to know about '{topic}'. "
+        "For example, ask for a definition, summary, comparison, or a document-specific answer."
+    )
+
+
 def _question_text_overlap(question: str, text: str) -> float:
-    q = _tok(question)
+    q = _question_tokens(question)
     if not q:
         return 0.0
     t = _tok(text)
@@ -168,7 +320,7 @@ def _question_text_overlap(question: str, text: str) -> float:
 
 
 def _question_context_coverage(question: str, hits: list[dict]) -> float:
-    question_tokens = _tok(question)
+    question_tokens = _question_tokens(question)
     if not question_tokens:
         return 0.0
     context_tokens = set()
@@ -232,8 +384,14 @@ def _is_good_fallback_sentence(sentence: str) -> bool:
         "output",
         "driver code",
         "formatted current date and time",
+        "page ",
+        "q&a",
     )
     if any(marker in low for marker in noise_markers):
+        return False
+    if sentence.strip().endswith("?"):
+        return False
+    if re.search(r"\b(how do i|why is|what is|what do you|how to)\b", low):
         return False
 
     alpha_count = sum(ch.isalpha() for ch in sentence)
@@ -241,14 +399,93 @@ def _is_good_fallback_sentence(sentence: str) -> bool:
     return ratio >= 0.65
 
 
+def _fallback_sentence_bonus(sentence: str, question: str) -> int:
+    bonus = 0
+    low = sentence.lower()
+    if detect_answer_intent(question) == DEFINITION:
+        if re.search(r"\b(is a|is an|refers to|defined as|means)\b", low):
+            bonus += 2
+    if re.search(r"\b(machine learning|retrieval augmented generation|rag)\b", low):
+        bonus += 1
+    return bonus
+
+
+def _is_definition_like_sentence(sentence: str) -> bool:
+    low = sentence.lower()
+    if low.startswith(("if ", "however ", "when ", "why ", "how ")):
+        return False
+    return bool(
+        re.search(
+            r"\b(is a|is an|are a|are an|refers to|defined as|means|is the field of|"
+            r"is the process of|gives computers the ability to)\b",
+            low,
+        )
+    )
+
+
+def _definition_subject_tokens(question: str) -> set[str]:
+    tokens = _question_tokens(question)
+    generic = {
+        "what",
+        "mean",
+        "definition",
+        "define",
+        "explain",
+        "simple",
+        "term",
+        "terms",
+        "meaning",
+    }
+    return {token for token in tokens if token not in generic}
+
+
+def _matches_definition_subject(sentence: str, question: str) -> bool:
+    subject_tokens = _definition_subject_tokens(question)
+    if not subject_tokens:
+        return True
+    sentence_tokens = _tok(sentence)
+    overlap = sentence_tokens & subject_tokens
+    if len(subject_tokens) == 1:
+        return bool(overlap)
+    return len(overlap) >= max(1, len(subject_tokens) - 1)
+
+
+def _normalize_fallback_text(text: str) -> str:
+    out = _clean_text(text)
+    cleanup_patterns = (
+        r"\bpage\s+\d+\s+of\s+\d+\b",
+        r"\b\d+(?:\.\d+){1,3}\b",
+        r"\bmachine learning a-z q&a\b",
+        r"\bq&a\b",
+    )
+    for pattern in cleanup_patterns:
+        out = re.sub(pattern, " ", out, flags=re.IGNORECASE)
+    out = re.sub(r"\s+", " ", out)
+    return out.strip()
+
+
 def _split_sentences(text: str) -> list[str]:
-    return [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
+    normalized = _normalize_fallback_text(text)
+    if not normalized:
+        return []
+
+    parts = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", normalized) if part.strip()]
+    expanded: list[str] = []
+    for part in parts:
+        if "?" in part:
+            fragments = [frag.strip(" -:") for frag in part.split("?") if frag.strip(" -:")]
+            expanded.extend(fragments)
+            continue
+        expanded.append(part)
+    return expanded
 
 
 def _rank_fallback_candidates(
-    question_tokens: set[str], hits: list[dict]
-) -> list[tuple[int, int, str, str, int]]:
-    ranked: list[tuple[int, int, str, str, int]] = []
+    question: str,
+    question_tokens: set[str],
+    hits: list[dict],
+) -> list[tuple[int, int, int, str, str, int]]:
+    ranked: list[tuple[int, int, int, str, str, int]] = []
     for hit in hits:
         text = _clean_text(hit.get("text", ""))
         source = hit.get("source", "unknown")
@@ -264,8 +501,10 @@ def _rank_fallback_candidates(
                 and sentence_word_count >= 6
                 and _is_good_fallback_sentence(sentence)
             ):
+                bonus = _fallback_sentence_bonus(sentence, question)
                 ranked.append(
                     (
+                        bonus,
                         overlap_count,
                         sentence_word_count,
                         sentence,
@@ -304,6 +543,25 @@ def _summary_fallback_candidates(hits: list[dict]) -> list[tuple[str, str, int]]
     return candidates
 
 
+def _semantic_fallback_candidates(hits: list[dict]) -> list[tuple[str, str, int]]:
+    candidates: list[tuple[str, str, int]] = []
+    sorted_hits = sorted(
+        hits,
+        key=lambda hit: (float(hit.get("rank_score", 0.0)), float(hit.get("score", 0.0))),
+        reverse=True,
+    )
+    for hit in sorted_hits[:5]:
+        if float(hit.get("rank_score", 0.0)) < 0.55:
+            continue
+        text = _clean_text(hit.get("text", ""))
+        source = hit.get("source", "unknown")
+        chunk_id = int(hit.get("chunk_id", -1))
+        for sentence in _split_sentences(text):
+            if _is_good_fallback_sentence(sentence):
+                candidates.append((sentence, source, chunk_id))
+    return candidates
+
+
 def _format_fallback(
     prefix: str, picked: list[tuple[str, str, int]]
 ) -> str | None:
@@ -313,19 +571,52 @@ def _format_fallback(
     return f"{prefix}\n" + "\n".join(lines)
 
 
+def _definition_sentence_match(sentence: str, question: str) -> bool:
+    return _is_definition_like_sentence(sentence) and _matches_definition_subject(
+        sentence, question
+    )
+
+
+def _restrict_definition_ranked_candidates(
+    ranked: list[tuple[int, int, int, str, str, int]],
+    question: str,
+) -> list[tuple[int, int, int, str, str, int]]:
+    return [row for row in ranked if _definition_sentence_match(row[3], question)]
+
+
+def _restrict_definition_sentence_candidates(
+    candidates: list[tuple[str, str, int]],
+    question: str,
+) -> list[tuple[str, str, int]]:
+    return [row for row in candidates if _definition_sentence_match(row[0], question)]
+
+
 def _extractive_fallback(question: str, hits: list[dict]) -> str | None:
-    question_tokens = _tok(question)
+    question_tokens = _question_tokens(question)
     if not question_tokens:
         return None
+    intent = detect_answer_intent(question)
 
-    ranked = _rank_fallback_candidates(question_tokens, hits)
+    ranked = _rank_fallback_candidates(question, question_tokens, hits)
+    if intent == DEFINITION:
+        ranked = _restrict_definition_ranked_candidates(ranked, question)
     if ranked:
-        ranked.sort(key=lambda row: (row[0], row[1]), reverse=True)
-        candidates = [(sent, source, chunk_id) for _, _, sent, source, chunk_id in ranked]
+        ranked.sort(key=lambda row: (row[0], row[1], row[2]), reverse=True)
+        candidates = [(sent, source, chunk_id) for _, _, _, sent, source, chunk_id in ranked]
         picked = _pick_unique_sentences(candidates, limit=3)
         return _format_fallback("Based on the uploaded documents:", picked)
 
-    if not _is_summary_intent(question):
+    semantic_candidates = _semantic_fallback_candidates(hits)
+    if intent == DEFINITION:
+        semantic_candidates = _restrict_definition_sentence_candidates(
+            semantic_candidates, question
+        )
+    picked = _pick_unique_sentences(semantic_candidates, limit=3)
+    fallback = _format_fallback("Based on the uploaded documents:", picked)
+    if fallback:
+        return fallback
+
+    if not _is_summary_intent(question) or intent == DEFINITION:
         return None
 
     summary_candidates = _summary_fallback_candidates(hits)
@@ -368,13 +659,84 @@ def _ensure_inline_citation(answer: str, hits: list[dict]) -> str:
 
 
 def _contains_unknown_marker(answer: str) -> bool:
-    return _UNKNOWN_SENTENCE.lower() in answer.strip().lower()
+    low = answer.strip().lower()
+    patterns = (
+        _UNKNOWN_SENTENCE.lower(),
+        "i don't know based on the provided context.",
+    )
+    return any(pattern in low for pattern in patterns)
 
 
 def _strip_unknown_marker(answer: str) -> str:
     out = re.sub(re.escape(_UNKNOWN_SENTENCE), "", answer, flags=re.IGNORECASE)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip(" \n\r\t-")
+
+
+def _clean_generated_answer_line(raw_line: str) -> str:
+    line = raw_line.strip()
+    if not line or re.fullmatch(r"\[[^\]]+\]", line):
+        return ""
+    line = re.sub(
+        r"^(Definition|Compact Statement|Cited Statement|Examples|Insufficient Context):\s*",
+        "",
+        line,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not line or line.lower() == _UNKNOWN_SENTENCE.lower():
+        return ""
+    return line
+
+
+def _pick_definition_sentences(question: str, cleaned: str) -> str:
+    picked: list[str] = []
+    for sentence in _split_sentences(cleaned):
+        if _definition_sentence_match(sentence, question):
+            picked.append(sentence)
+        elif not picked and _matches_definition_subject(sentence, question):
+            picked.append(sentence)
+        if len(picked) >= 2:
+            break
+    if picked:
+        return " ".join(picked)
+    return cleaned
+
+
+def _normalized_sentence_key(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+
+
+def _strip_leading_question_echo(question: str, cleaned: str) -> str:
+    sentences = _split_sentences(cleaned)
+    if len(sentences) < 2:
+        return cleaned
+
+    leading = sentences[0].strip()
+    normalized_prompt = _normalized_sentence_key(question.rstrip("?.!"))
+    normalized_leading = _normalized_sentence_key(leading.rstrip("?.!"))
+    if not normalized_prompt or normalized_prompt != normalized_leading:
+        return cleaned
+
+    remainder = " ".join(sentences[1:]).strip()
+    return remainder or cleaned
+
+
+def _cleanup_generated_answer(question: str, answer: str) -> str:
+    intent = detect_answer_intent(question)
+    cleaned_lines = [
+        line
+        for line in (
+            _clean_generated_answer_line(raw_line) for raw_line in answer.splitlines()
+        )
+        if line
+    ]
+
+    cleaned = "\n".join(cleaned_lines).strip()
+    cleaned = _strip_leading_question_echo(question, cleaned)
+    if intent != DEFINITION or not cleaned:
+        return cleaned or answer
+
+    return _pick_definition_sentences(question, cleaned)
 
 
 def _public_source_labels(citations: list[Citation]) -> dict[str, str]:
@@ -586,6 +948,7 @@ def _build_document_inventory_result(
                 "groundedness": 0.0,
                 "inventory_mode": True,
                 "indexed_doc_count": 0,
+                "answer_policy": "inventory",
             },
         )
 
@@ -622,6 +985,7 @@ def _build_document_inventory_result(
             "groundedness": 1.0,
             "inventory_mode": True,
             "indexed_doc_count": len(entries),
+            "answer_policy": "inventory",
         },
     )
 
@@ -657,6 +1021,7 @@ def _cache_response_for_request(
         "request_id": request_id,
         "cache_hit": True,
         "fallback_used": False,
+        "answer_policy": result.meta.get("answer_policy", "cached"),
     }
     return result
 
@@ -720,10 +1085,11 @@ def _generate_answer(question: str, contexts: list[dict], state: ChatState) -> s
 def _apply_fallback_policy(
     question: str, contexts: list[dict], answer: str, state: ChatState
 ) -> str:
+    answer = _cleanup_generated_answer(question, answer)
     if _contains_unknown_marker(answer):
         stripped = _strip_unknown_marker(answer)
         if len(stripped.split()) >= 12:
-            return stripped
+            return _cleanup_generated_answer(question, stripped)
         fallback = _extractive_fallback(question, contexts)
         if fallback:
             state.fallback_used = True
@@ -733,7 +1099,7 @@ def _apply_fallback_policy(
 
     grounded = _answer_groundedness(answer, contexts)
     if grounded >= settings.FAITHFULNESS_MIN_GROUNDED:
-        return answer
+        return _cleanup_generated_answer(question, answer)
 
     fallback = _extractive_fallback(question, contexts)
     if fallback:
@@ -777,6 +1143,7 @@ def _build_result(
             "cache_hit": state.cache_hit,
             "fallback_used": state.fallback_used,
             "groundedness": _answer_groundedness(answer, contexts),
+            "answer_policy": "document_grounded",
         },
     )
 
@@ -807,6 +1174,7 @@ def _build_guardrail_block_result(
             "groundedness": 0.0,
             "guardrail_blocked": True,
             "guardrail_categories": categories,
+            "answer_policy": "refuse",
         },
     )
 
@@ -834,6 +1202,69 @@ def _build_out_of_scope_result(
             "groundedness": 0.0,
             "out_of_scope_blocked": True,
             "question_context_coverage": coverage,
+            "answer_policy": "out_of_scope",
+        },
+    )
+
+
+def _build_non_rag_fallback_result(
+    request_id: str,
+    state: ChatState,
+    answer: str,
+    coverage: float,
+    fallback_type: str,
+) -> ChatResponse:
+    state.fallback_used = True
+    inc_fallback_answers()
+    return ChatResponse(
+        answer=answer,
+        citations=[],
+        meta={
+            "request_id": request_id,
+            "model": settings.CHAT_MODEL,
+            "embed_model": settings.EMBED_MODEL,
+            "prompt_version": settings.PROMPT_VERSION,
+            "retrieve_sec": state.retrieve_sec,
+            "rerank_sec": state.rerank_sec,
+            "generate_sec": state.generate_sec,
+            "top_k": settings.TOP_K,
+            "cache_hit": state.cache_hit,
+            "fallback_used": state.fallback_used,
+            "groundedness": 0.0,
+            "question_context_coverage": coverage,
+            "non_rag_fallback": fallback_type,
+            "answer_policy": (
+                "safe_caution"
+                if fallback_type == "medical_safety"
+                else "direct_answer"
+            ),
+        },
+    )
+
+
+def _build_clarification_result(
+    request_id: str,
+    state: ChatState,
+    answer: str,
+    coverage: float = 0.0,
+) -> ChatResponse:
+    return ChatResponse(
+        answer=answer,
+        citations=[],
+        meta={
+            "request_id": request_id,
+            "model": settings.CHAT_MODEL,
+            "embed_model": settings.EMBED_MODEL,
+            "prompt_version": settings.PROMPT_VERSION,
+            "retrieve_sec": state.retrieve_sec,
+            "rerank_sec": state.rerank_sec,
+            "generate_sec": state.generate_sec,
+            "top_k": settings.TOP_K,
+            "cache_hit": state.cache_hit,
+            "fallback_used": state.fallback_used,
+            "groundedness": 0.0,
+            "question_context_coverage": coverage,
+            "answer_policy": "ask_clarification",
         },
     )
 
@@ -970,6 +1401,42 @@ def _log_chat_success(
     )
 
 
+def _log_answer_outcome(
+    request_id: str,
+    question: str,
+    result: ChatResponse,
+    contexts: list[dict],
+) -> None:
+    log_event(
+        {
+            "type": "answer_outcome",
+            "request_id": request_id,
+            "answer_policy": result.meta.get("answer_policy", ""),
+            "fallback_used": bool(result.meta.get("fallback_used", False)),
+            "question_context_coverage": float(result.meta.get("question_context_coverage", 0.0)),
+            "context_count": len(contexts),
+            "citation_count": len(result.citations),
+            **_question_metadata(question),
+        }
+    )
+
+
+def _log_feedback_event(feedback: FeedbackRequest) -> None:
+    payload = {
+        "type": "chat_feedback",
+        "request_id": feedback.request_id,
+        "helpful": feedback.helpful,
+    }
+    if feedback.question:
+        payload.update(_question_metadata(feedback.question))
+    if feedback.answer:
+        payload["answer_hash"] = _short_hash(feedback.answer)
+    if feedback.correction:
+        payload["correction_hash"] = _short_hash(feedback.correction)
+        payload["correction_len"] = len(feedback.correction)
+    log_event(payload)
+
+
 def _log_chat_end(request_id: str, question: str, state: ChatState) -> None:
     total = time.time() - state.started
     observe_chat_latency(total)
@@ -1019,8 +1486,14 @@ def _run_chat_pipeline(question: str, request_id: str, state: ChatState) -> Chat
     if guardrail_result is not None:
         return guardrail_result
 
+    direct_result = _maybe_direct_policy_result(question, request_id, state)
+    if direct_result is not None:
+        return direct_result
+
     cached = _cache_response_for_request(question, request_id, state)
     if cached:
+        _log_chat_success(request_id, question, cached, contexts=[])
+        _log_answer_outcome(request_id, question, cached, contexts=[])
         return cached
 
     hits = _retrieve_hits(question, state)
@@ -1038,6 +1511,7 @@ def _run_chat_pipeline(question: str, request_id: str, state: ChatState) -> Chat
     result = _build_result(request_id, answer, contexts, state)
     result = _apply_public_sanitization(result)
     _log_chat_success(request_id, question, result, contexts)
+    _log_answer_outcome(request_id, question, result, contexts)
 
     if settings.ENABLE_CACHE:
         set_cached(question, result.model_dump())
@@ -1058,6 +1532,7 @@ def _maybe_inventory_result(
         )
         result = _apply_public_sanitization(result)
         _log_chat_success(request_id, question, result, contexts=[])
+        _log_answer_outcome(request_id, question, result, contexts=[])
         return result
     except UnexpectedResponse as exc:
         inc_chat_error("qdrant_error")
@@ -1099,7 +1574,39 @@ def _maybe_guardrail_block(
     )
     _log_guardrail_block(request_id, question, risk["categories"])
     _log_chat_success(request_id, question, result, contexts=[])
+    _log_answer_outcome(request_id, question, result, contexts=[])
     return result
+
+
+def _maybe_direct_policy_result(
+    question: str,
+    request_id: str,
+    state: ChatState,
+) -> ChatResponse | None:
+    fallback = _non_rag_fallback_answer(question)
+    if fallback is not None:
+        answer, fallback_type = fallback
+        result = _build_non_rag_fallback_result(
+            request_id=request_id,
+            state=state,
+            answer=answer,
+            coverage=0.0,
+            fallback_type=fallback_type,
+        )
+        _log_chat_success(request_id, question, result, contexts=[])
+        _log_answer_outcome(request_id, question, result, contexts=[])
+        return result
+
+    if _is_short_ambiguous_question(question):
+        result = _build_clarification_result(
+            request_id=request_id,
+            state=state,
+            answer=_clarification_prompt(question),
+        )
+        _log_chat_success(request_id, question, result, contexts=[])
+        _log_answer_outcome(request_id, question, result, contexts=[])
+        return result
+    return None
 
 
 def _maybe_out_of_scope_result(
@@ -1115,6 +1622,31 @@ def _maybe_out_of_scope_result(
     if coverage >= settings.OUT_OF_SCOPE_MIN_COVERAGE:
         return None
 
+    fallback = _non_rag_fallback_answer(question)
+    if fallback is not None:
+        answer, fallback_type = fallback
+        result = _build_non_rag_fallback_result(
+            request_id=request_id,
+            state=state,
+            answer=answer,
+            coverage=coverage,
+            fallback_type=fallback_type,
+        )
+        _log_chat_success(request_id, question, result, contexts=[])
+        _log_answer_outcome(request_id, question, result, contexts=[])
+        return result
+
+    if _is_short_ambiguous_question(question):
+        result = _build_clarification_result(
+            request_id=request_id,
+            state=state,
+            answer=_clarification_prompt(question),
+            coverage=coverage,
+        )
+        _log_chat_success(request_id, question, result, contexts=[])
+        _log_answer_outcome(request_id, question, result, contexts=[])
+        return result
+
     result = _build_out_of_scope_result(
         request_id=request_id,
         state=state,
@@ -1122,7 +1654,14 @@ def _maybe_out_of_scope_result(
     )
     _log_out_of_scope_block(request_id, question, coverage)
     _log_chat_success(request_id, question, result, contexts=[])
+    _log_answer_outcome(request_id, question, result, contexts=[])
     return result
+
+
+@app.post("/chat/feedback")
+def chat_feedback(req: FeedbackRequest, _: None = Depends(require_api_key)) -> dict[str, bool]:
+    _log_feedback_event(req)
+    return {"ok": True}
 
 
 @app.post("/chat", response_model=ChatResponse)

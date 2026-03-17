@@ -21,3 +21,11 @@ class ChatResponse(BaseModel):
     answer: str
     citations: List[Citation]
     meta: Dict[str, Any]
+
+
+class FeedbackRequest(BaseModel):
+    request_id: str
+    helpful: bool
+    question: Optional[str] = None
+    answer: Optional[str] = None
+    correction: Optional[str] = None
